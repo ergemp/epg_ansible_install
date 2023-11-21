@@ -1,0 +1,13 @@
+
+# test inventory
+ansible-inventory -i inventory/dev-postgres.ini --list
+ansible all -i inventory/test-postgres-onprem.ini -m ping
+ansible all -i inventory/test-postgres-onprem.ini -m ping -u papel --ask-pass
+
+# install postgresql-15 on ubuntu
+ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-fedora.yaml
+
+# install kafka on fedora with ssh username/pass
+ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-fedora.yaml --ask-pass
+ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-centos.yaml --ask-pass
+

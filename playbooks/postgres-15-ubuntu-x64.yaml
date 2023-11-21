@@ -1,0 +1,319 @@
+- name: Install Postgresql 15 (Ubuntu)
+  hosts: test-postgres-servers
+  vars:
+    # become user for unprivileged user
+    ansible_shell_allow_world_readable_temp: true
+    allow_world_readable_tmpfiles: true
+    pg_app_name: appdb
+  remote_user: root
+  become: yes
+  become_user: root
+
+  tasks:
+  # check system status
+  # if the postgres installation files exists
+  - name: determine available groups
+    getent:
+      database: group
+
+  - name: determine available users
+    getent:
+      database: passwd
+
+  - name: determine postgresql installation
+    ansible.builtin.stat:
+      path: "/etc/postgresql/15/main/pg_hba.conf"
+    register: postgres_install
+
+  - name: determine node-exporter installation
+    ansible.builtin.stat:
+      path: "/usr/local/node-exporter"
+    register: node_exporter_install
+
+  - name: determine postgres-exporter installation
+    ansible.builtin.stat:
+      path: "/usr/local/postgres-exporter"
+    register: postgres_exporter_install
+
+  - name: determine pg-badger installation
+    ansible.builtin.stat:
+      path: "/usr/local/pg-badger"
+    register: pg_badger_install
+
+  - name: determine jetty installation
+    ansible.builtin.stat:
+      path: "/usr/local/jetty"
+    register: jetty_install
+
+  - name: determine pgdata
+    ansible.builtin.stat:
+      path: "/pg_data/15/main"
+    register: postgres_pgdata
+
+  - name: determine node_exporter_tgz_file
+    stat:
+      path: "/home/{{ os_user }}/node_exporter-1.6.0.linux-amd64.tar.gz"
+    register: node_exporter_tgz_file
+
+  - name: determine postgres_exporter_tgz_file
+    stat:
+      path: "/home/{{ os_user }}/postgres_exporter-0.12.0.linux-amd64.tar.gz"
+    register: postgres_exporter_tgz_file
+
+  - name: determine pgbadger_tgz_file
+    stat:
+      path: "/home/{{ os_user }}/v12.1.tar.gz"
+    register: pg_badger_tgz_file
+
+  - name: determine jetty_tgz_file
+    stat:
+      path: "/home/{{ os_user }}/jetty-distribution-9.4.51.v20230217.tar.gz"
+    register: jetty_tgz_file
+  # end check
+
+  # dependency for postgresql commands
+  # and also become user for unprivileged user
+  # https://docs.ansible.com/ansible/2.9/modules/postgresql_query_module.html
+
+  # install perl for pgbadger
+
+    # install extra packages if needed
+  - name: Install extra packages
+    ansible.builtin.yum:
+      name: "{{ packages }}"
+      state: present
+    vars:
+      packages:
+        - zip
+        - wget
+        - curl
+        - tar
+
+  - name: "stop and disable firewalld"
+    service:
+      name: firewalld
+      state: stopped
+      enabled: False
+
+  - name: "disable selinux"
+    ansible.posix.selinux:
+            state: disabled
+
+  - name: "reboot the host"
+    ansible.builtin.reboot:
+      reboot_timeout: 300
+
+  - name: install postgresql
+    shell: |
+      echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list
+      wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+      wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/pgdg.asc &>/dev/null
+      apt update
+      apt install postgresql-15 -y
+    when: not postgres_install.stat.exists
+
+  - name: install pg_cron
+    shell: |    
+      apt -y install postgresql-15-cron
+    when: not postgres_install.stat.exists
+
+  - name: install pip3
+    apt:
+      name: python3-pip
+      state: present
+
+  - name: pip install psycopg2
+    pip:
+      name: psycopg2-binary
+      state: present
+
+  - name: pip install pg_activity
+    pip:
+      name: pg_activity
+      state: present
+
+  - name: stop postgresql service
+    ansible.builtin.service:
+      name: "postgresql.service"
+      state: stopped
+
+  - name: create pg_data custom location
+    shell: |    
+      mkdir -p /pg_data/15/
+      mv /var/lib/postgresql/15 /pg_data      
+    when: not postgres_pgdata.stat.exists
+
+  - name: authorize postgres for pg_data location
+    shell: |        
+      chown -R postgres:postgres /pg_data
+    when: postgres_pgdata.stat.exists
+
+  - name: copy postgresql.conf
+    copy:
+      src: "{{ playbook_dir }}/../configs/postgresql/postgresql.conf"
+      dest: /etc/postgresql/15/main/
+
+  - name: copy pg_hba.conf
+    copy:
+      src: "{{ playbook_dir }}/../configs/postgresql/pg_hba.conf"
+      dest: /etc/postgresql/15/main/
+
+  - name: start postgresql service
+    ansible.builtin.service:
+      name: "postgresql.service"
+      state: started
+
+  - name: alter postgres user password
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: alter user postgres with password 'postgres'
+
+  - name: enable extension pg_stat_statements
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists pg_stat_statements
+
+  - name: enable extension pg_cron
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists pg_cron
+
+  - name: enable extension postgres_fdw
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists postgres_fdw
+
+  - name: enable extension file_fdw
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists file_fdw
+
+  - name: enable extension pgstattuple
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists pgstattuple
+
+  - name: enable extension pageinspect
+    become: true
+    become_user: postgres
+    postgresql_query:
+      db: postgres
+      query: create extension if not exists pageinspect
+
+  # ref: https://docs.ansible.com/ansible/latest/collections/community/postgresql/postgresql_user_module.html
+  - name: create monitoring user postgres_exporter
+    become: true
+    become_user: postgres
+    community.postgresql.postgresql_user:
+      db: postgres
+      name: postgres_exporter
+      password: postgres_exporter
+      priv: "CONNECT"
+
+  # ref: https://docs.ansible.com/ansible/latest/collections/community/postgresql/postgresql_membership_module.html
+  - name: grant necessary roles to postgres_exporter
+    become: true
+    become_user: postgres
+    community.postgresql.postgresql_membership:
+      groups:
+      - pg_monitor
+      - pg_read_all_stats
+      target_role: postgres_exporter
+      state: present
+
+  - name: download node-exporter
+    shell: |    
+      wget https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz
+    when: not node_exporter_tgz_file.stat.exists
+
+  - name: download postgres-exporter
+    shell: |    
+      wget https://github.com/prometheus-community/postgres_exporter/releases/download/v0.12.0/postgres_exporter-0.12.0.linux-amd64.tar.gz
+    when: not postgres_exporter_tgz_file.stat.exists
+
+  - name: download pgbadger
+    shell: |    
+      wget https://github.com/darold/pgbadger/archive/refs/tags/v12.1.tar.gz
+    when: not pg_badger_tgz_file.stat.exists
+
+  - name: download jetty
+    shell: |    
+      wget https://repo1.maven.org/maven2/org/eclipse/jetty/jetty-distribution/9.4.51.v20230217/jetty-distribution-9.4.51.v20230217.tar.gz
+    when: not jetty_tgz_file.stat.exists
+
+  - name: install node-exporter
+    shell: |
+      cd /home/{{ os_user }}
+      gunzip /home/{{ os_user }}/node_exporter-1.6.0.linux-amd64.tar.gz
+      tar -xvf /home/{{ os_user }}/node_exporter-1.6.0.linux-amd64.tar
+      mv /home/{{ os_user }}/node_exporter-1.6.0.linux-amd64 /usr/local/node-exporter
+      chown -R postgres:postgres /usr/local/node-exporter
+    when: not node_exporter_install.stat.exists
+
+  - name: install postgres-exporter
+    shell: |
+      cd /home/{{ os_user }}
+      gunzip /home/{{ os_user }}/postgres_exporter-0.12.0.linux-amd64.tar.gz
+      tar -xvf /home/{{ os_user }}/postgres_exporter-0.12.0.linux-amd64.tar
+      mv /home/{{ os_user }}/postgres_exporter-0.12.0.linux-amd64 /usr/local/postgres-exporter
+      chown -R postgres:postgres /usr/local/postgres-exporter
+    when: not postgres_exporter_install.stat.exists
+
+  - name: install pg_badger
+    shell: |
+      cd /home/{{ os_user }}
+      gunzip /home/{{ os_user }}/v12.1.tar.gz
+      tar -xvf /home/{{ os_user }}/v12.1.tar
+      mv /home/{{ os_user }}/pgbadger-12.1 /usr/local/pg-badger
+      chown -R postgres:postgres /usr/local/pg-badger
+    when: not pg_badger_install.stat.exists
+
+  - name: install jetty
+    shell: |
+      cd /home/{{ os_user }}
+      gunzip /home/{{ os_user }}/jetty-distribution-9.4.51.v20230217.tar.gz
+      tar -xvf /home/{{ os_user }}/jetty-distribution-9.4.51.v20230217.tar
+      mv /home/{{ os_user }}/jetty-distribution-9.4.51.v20230217 /usr/local/jetty
+    when: not jetty_install.stat.exists
+
+  - name: copying postrgres-exporter env file
+    copy:
+      src: "{{ playbook_dir }}/../configs/postgresql/postgres-exporter.env"
+      dest: /usr/local/postgres-exporter
+
+  - name: copying postgres-exporter service config
+    copy:
+      src: "{{ playbook_dir }}/../configs/postgresql/postgres-exporter.service"
+      dest: /etc/systemd/system/postgres-exporter.service
+
+  - name: copying node-exporter service config
+    copy:
+      src: "{{ playbook_dir }}/../configs/postgresql/node-exporter.service"
+      dest: /etc/systemd/system/node-exporter.service
+
+  - name: starting node-exporter with service
+    ansible.builtin.service:
+      name: "node-exporter.service"
+      enabled: true
+      state: started
+
+  - name: starting postgres-exporter with service
+    ansible.builtin.service:
+      name: "postgres-exporter.service"
+      enabled: true
+      state: started
+
+
+

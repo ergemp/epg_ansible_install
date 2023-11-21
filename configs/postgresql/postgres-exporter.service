@@ -1,0 +1,13 @@
+[Unit]
+Description=Postgresql exporter
+Wants=network-online.target
+After=network-online.target
+[Service]
+User=postgres
+Group=postgres
+WorkingDirectory=/usr/local/postgres-exporter
+EnvironmentFile=/usr/local/postgres-exporter/postgres-exporter.env
+ExecStart=/usr/local/postgres-exporter/postgres_exporter --web.listen-address=:9187 --web.telemetry-path=/metrics
+#Restart=always
+[Install]
+WantedBy=multi-user.target
