@@ -158,10 +158,23 @@
       src: "{{ playbook_dir }}/../configs/postgresql/pg_hba.conf"
       dest: /etc/postgresql/15/
 
+  - name: chown /etc/postgresql
+    shell: |    
+      chown -R postgres:postgres /etc/postgresql
+
   - name: copy postgresql-15.service file
     copy:
       src: "{{ playbook_dir }}/../configs/postgresql/centos/postgresql-15.service"
       dest: /usr/lib/systemd/system/
+
+  - name: alter .bash_profile
+    shell: |    
+      sed -i '/PGDATA/d' /var/lib/pgsql/.bash_profile
+      echo "" >> /var/lib/pgsql/.bash_profile
+      echo "export PGDATA=/pg_data/15/data" >> //var/lib/pgsql/.bash_profile
+
+  - name: daemon-reload
+    shell: systemctl daemon-reload
 
   - name: start postgresql service
     ansible.builtin.service:

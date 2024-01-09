@@ -11,3 +11,4 @@ ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-fedora.yaml
 ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-fedora.yaml --ask-pass
 ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-centos.yaml --ask-pass
 
+ansible-playbook -i inventory/dev-postgres.ini playbooks/postgres-15-centos-a64.yaml --ask-pass
